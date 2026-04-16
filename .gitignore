@@ -1,0 +1,13 @@
+*.mid
+*.MID
+*.midi
+*.wav
+*.mp3
+*.gp5
+*.gp
+*.gpx
+*_song_data.json
+*_song_data_enhanced.json
+__pycache__/
+*.pyc
+.DS_Store
