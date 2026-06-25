@@ -13,13 +13,14 @@ When a keyboard player exports a MIDI file, the voicings are polyphonic and the 
 `midi_to_gp5.py` reads the raw MIDI notes, clusters simultaneous events, assigns each note to a guitar string using brute-force voicing optimization, and writes the result as a GP5 file. Arpeggios stay as arpeggios. Block chords stay as block chords.
 
 ```bash
-python midi_to_gp5.py input.mid output.gp5 72
+python midi_to_gp5.py input.mid [output.gp5] [bpm] [--bass]
 ```
 
 Arguments:
 - `input.mid` -- source MIDI file
 - `output.gp5` -- output Guitar Pro 5 file (default: `output.gp5`)
-- `72` -- playback BPM for the GP5 file (default: 72)
+- `bpm` -- playback BPM for the GP5 file (default: 72)
+- `--bass` -- bass guitar mode: 4-string standard GDAE tuning, Electric Bass instrument
 
 ### 2. Three-Stage Chord Pipeline
 
@@ -40,7 +41,7 @@ Stage 2 can also be done manually or with an LLM reviewing the intermediate JSON
 
 ## How String Assignment Works
 
-For each MIDI note (or cluster of simultaneous notes), the converter finds valid guitar string/fret combinations in standard EADGBE tuning (max fret 15). For chords, it uses brute-force search over all valid combinations to minimize:
+For each MIDI note (or cluster of simultaneous notes), the converter finds valid string/fret combinations within the selected tuning (max fret 15). For chords, it uses brute-force search over all valid combinations to minimize:
 
 ```
 score = max_fret * 10 + fret_spread * 5 + avg_fret
@@ -50,8 +51,9 @@ This heavily penalizes high-fret positions and wide stretches, producing voicing
 
 ## What You Get
 
-- Single-track acoustic guitar tab in GP5 format
-- Standard EADGBE tuning
+- Single-track tab in GP5 format
+- Guitar mode: Acoustic Guitar, standard EADGBE tuning (6 strings)
+- Bass mode: Electric Bass, standard GDAE tuning (4 strings)
 - Arpeggios preserved as individual notes on separate beats
 - Block chords with optimized fret positions
 - Correct time signature and beat durations
