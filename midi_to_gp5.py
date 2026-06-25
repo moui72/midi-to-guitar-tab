@@ -71,7 +71,7 @@ def assign_cluster(pitches, string_midi):
     """
     if len(pitches) == 1:
         result = assign_single_note(pitches[0], string_midi)
-        return [result] if result else [None]
+        return [result] if result else [(None, None)]
 
     # Get options for each note
     all_options = [get_string_options(p, string_midi) for p in pitches]
@@ -117,7 +117,7 @@ def _greedy_assign(pitches, string_midi):
     """Greedy fallback: assign from highest pitch to lowest, taking best available string."""
     indexed = sorted(enumerate(pitches), key=lambda x: -x[1])
     used_strings = set()
-    result = [None] * len(pitches)
+    result = [(None, None)] * len(pitches)
 
     for orig_idx, pitch in indexed:
         options = get_string_options(pitch, string_midi)
