@@ -194,7 +194,7 @@ def fill_remaining(voice, remaining_ql):
     return beats
 
 
-def build_gp5(midi_path, output_path, target_bpm=72, bass=False):
+def build_gp5(midi_path, output_path, target_bpm=72, bass=False, pad_measures=0):
     pm = pretty_midi.PrettyMIDI(midi_path)
     string_midi = BASS_STRINGS if bass else GUITAR_STRINGS
     if not pm.instruments or not pm.instruments[0].notes:
@@ -225,7 +225,7 @@ def build_gp5(midi_path, output_path, target_bpm=72, bass=False):
         })
 
     last_beat = max(e["beat"] + e["dur_ql"] for e in events)
-    total_measures = int(last_beat // 4) + 1
+    total_measures = max(int(last_beat // 4) + 1, pad_measures)
 
     # Cluster notes by start time (within 0.06 beats = simultaneous)
     CLUSTER_THRESH = 0.06
@@ -392,8 +392,12 @@ def build_gp5(midi_path, output_path, target_bpm=72, bass=False):
         if not voice.beats:
             voice.beats.append(make_beat(voice, [], 1, False, is_rest=True))
 
+    content_measures = int(last_beat // 4) + 1
     gp.write(song, output_path)
-    print(f"Wrote {total_measures} measures to {output_path}")
+    if total_measures > content_measures:
+        print(f"Wrote {total_measures} measures to {output_path} ({total_measures - content_measures} empty bars padded)")
+    else:
+        print(f"Wrote {total_measures} measures to {output_path}")
 
 
 if __name__ == "__main__":
@@ -405,5 +409,6 @@ if __name__ == "__main__":
     parser.add_argument("output", nargs="?", default="output.gp5", help="Output GP5 file (default: output.gp5)")
     parser.add_argument("bpm", nargs="?", type=int, default=72, help="Playback BPM (default: 72)")
     parser.add_argument("--bass", action="store_true", help="Bass guitar mode: 4-string standard GDAE tuning")
+    parser.add_argument("--measures", type=int, default=0, metavar="N", help="Pad output to at least N measures with empty bars")
     args = parser.parse_args()
-    build_gp5(args.input, args.output, args.bpm, bass=args.bass)
+    build_gp5(args.input, args.output, args.bpm, bass=args.bass, pad_measures=args.measures)
