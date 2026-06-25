@@ -201,7 +201,15 @@ def build_gp5(midi_path, output_path, target_bpm=72, bass=False):
         print("No notes found.")
         return
 
-    raw_notes = sorted(pm.instruments[0].notes, key=lambda n: n.start)
+    seen = set()
+    raw_notes = []
+    for inst in pm.instruments:
+        for n in inst.notes:
+            key = (n.pitch, round(n.start, 3))
+            if key not in seen:
+                seen.add(key)
+                raw_notes.append(n)
+    raw_notes.sort(key=lambda n: n.start)
     tempo_changes = pm.get_tempo_changes()
     midi_bpm = tempo_changes[1][0] if len(tempo_changes[1]) > 0 else 120
     beat_dur = 60.0 / midi_bpm
