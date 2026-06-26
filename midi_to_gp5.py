@@ -2,10 +2,11 @@
 Direct MIDI -> GP5 conversion preserving original rhythm, arpeggios, and note durations.
 No chordify. Maps each MIDI note to guitar string/fret with smart voicing.
 
-Usage: python midi_to_gp5.py input.mid output.gp5 [bpm]
+Usage: python midi_to_gp5.py input.mid [output.gp5] [bpm] [--bass]
 """
 
 import sys
+import argparse
 from itertools import product
 from pathlib import Path
 from collections import defaultdict
@@ -13,8 +14,10 @@ import pretty_midi
 import guitarpro as gp
 
 
-# Standard EADGBE: string number (1=high E) -> open MIDI pitch
-STRING_MIDI = {1: 64, 2: 59, 3: 55, 4: 50, 5: 45, 6: 40}
+# String tuning presets: string number (1=highest pitch) -> open MIDI pitch
+GUITAR_STRINGS = {1: 64, 2: 59, 3: 55, 4: 50, 5: 45, 6: 40}  # EADGBE
+BASS_STRINGS   = {1: 43, 2: 38, 3: 33, 4: 28}                 # GDAE (4-string standard)
+
 MAX_FRET = 15
 
 # GP duration quantization table
@@ -40,19 +43,19 @@ def quantize_ql(ql):
     return best[1], best[2], best[0]
 
 
-def get_string_options(pitch):
+def get_string_options(pitch, string_midi):
     """Get all valid (string, fret) for a MIDI pitch, sorted by preference."""
     options = []
-    for s_num in range(1, 7):
-        fret = pitch - STRING_MIDI[s_num]
+    for s_num in string_midi:
+        fret = pitch - string_midi[s_num]
         if 0 <= fret <= MAX_FRET:
             options.append((s_num, fret))
     return options
 
 
-def assign_single_note(pitch):
+def assign_single_note(pitch, string_midi):
     """Assign a single note to the best string/fret."""
-    options = get_string_options(pitch)
+    options = get_string_options(pitch, string_midi)
     if not options:
         return None
     # Prefer: fret 0-5 on natural string, then lowest fret overall
@@ -60,18 +63,18 @@ def assign_single_note(pitch):
     return options[0]
 
 
-def assign_cluster(pitches):
+def assign_cluster(pitches, string_midi):
     """
     Assign multiple simultaneous notes to guitar strings.
     Uses brute-force search to minimize fret spread.
     Returns list of (string, fret) matching input order, or None for unplaceable notes.
     """
     if len(pitches) == 1:
-        result = assign_single_note(pitches[0])
-        return [result] if result else [None]
+        result = assign_single_note(pitches[0], string_midi)
+        return [result] if result else [(None, None)]
 
     # Get options for each note
-    all_options = [get_string_options(p) for p in pitches]
+    all_options = [get_string_options(p, string_midi) for p in pitches]
 
     # If any note has no options, mark it None
     for i, opts in enumerate(all_options):
@@ -105,19 +108,19 @@ def assign_cluster(pitches):
 
     if best_combo is None:
         # Fallback: assign greedily from highest pitch down
-        return _greedy_assign(pitches)
+        return _greedy_assign(pitches, string_midi)
 
     return list(best_combo)
 
 
-def _greedy_assign(pitches):
+def _greedy_assign(pitches, string_midi):
     """Greedy fallback: assign from highest pitch to lowest, taking best available string."""
     indexed = sorted(enumerate(pitches), key=lambda x: -x[1])
     used_strings = set()
-    result = [None] * len(pitches)
+    result = [(None, None)] * len(pitches)
 
     for orig_idx, pitch in indexed:
-        options = get_string_options(pitch)
+        options = get_string_options(pitch, string_midi)
         options = [(s, f) for s, f in options if s not in used_strings]
         if options:
             options.sort(key=lambda x: (x[1], x[0]))
@@ -191,13 +194,22 @@ def fill_remaining(voice, remaining_ql):
     return beats
 
 
-def build_gp5(midi_path, output_path, target_bpm=72):
+def build_gp5(midi_path, output_path, target_bpm=72, bass=False, pad_measures=0):
     pm = pretty_midi.PrettyMIDI(midi_path)
+    string_midi = BASS_STRINGS if bass else GUITAR_STRINGS
     if not pm.instruments or not pm.instruments[0].notes:
         print("No notes found.")
         return
 
-    raw_notes = sorted(pm.instruments[0].notes, key=lambda n: n.start)
+    seen = set()
+    raw_notes = []
+    for inst in pm.instruments:
+        for n in inst.notes:
+            key = (n.pitch, round(n.start, 3))
+            if key not in seen:
+                seen.add(key)
+                raw_notes.append(n)
+    raw_notes.sort(key=lambda n: n.start)
     tempo_changes = pm.get_tempo_changes()
     midi_bpm = tempo_changes[1][0] if len(tempo_changes[1]) > 0 else 120
     beat_dur = 60.0 / midi_bpm
@@ -213,7 +225,7 @@ def build_gp5(midi_path, output_path, target_bpm=72):
         })
 
     last_beat = max(e["beat"] + e["dur_ql"] for e in events)
-    total_measures = int(last_beat // 4) + 1
+    total_measures = max(int(last_beat // 4) + 1, pad_measures)
 
     # Cluster notes by start time (within 0.06 beats = simultaneous)
     CLUSTER_THRESH = 0.06
@@ -248,10 +260,10 @@ def build_gp5(midi_path, output_path, target_bpm=72):
     song.tempo = target_bpm
 
     track = song.tracks[0]
-    track.name = "Acoustic Guitar"
+    track.name = "Bass Guitar" if bass else "Acoustic Guitar"
     track.isPercussionTrack = False
-    track.channel.instrument = 25
-    track.strings = [gp.GuitarString(number=i, value=STRING_MIDI[i]) for i in range(1, 7)]
+    track.channel.instrument = 34 if bass else 25
+    track.strings = [gp.GuitarString(number=i, value=string_midi[i]) for i in sorted(string_midi)]
 
     song.measureHeaders[0].timeSignature.numerator = 4
     song.measureHeaders[0].timeSignature.denominator.value = 4
@@ -317,7 +329,7 @@ def build_gp5(midi_path, output_path, target_bpm=72):
                 running_ql = pos
 
             # Emit the note beat + any rest beats to fill the duration
-            assignments = assign_cluster(pitches)
+            assignments = assign_cluster(pitches, string_midi)
             valid = [(s, f, v) for (s, f), v in zip(assignments, vels) if s is not None]
 
             # Find the largest GP duration that fits within dur
@@ -365,7 +377,7 @@ def build_gp5(midi_path, output_path, target_bpm=72):
                 slot_pos = slot_num * 0.25
                 if grid_idx < len(grid_sorted) and abs(grid_sorted[grid_idx][0] - slot_pos) < 0.13:
                     pitches, vels = grid_sorted[grid_idx][1]
-                    assignments = assign_cluster(pitches)
+                    assignments = assign_cluster(pitches, string_midi)
                     valid = [(s, f, v) for (s, f), v in zip(assignments, vels) if s is not None]
                     if valid:
                         note_pairs = [(s, f) for s, f, _ in valid]
@@ -380,15 +392,23 @@ def build_gp5(midi_path, output_path, target_bpm=72):
         if not voice.beats:
             voice.beats.append(make_beat(voice, [], 1, False, is_rest=True))
 
+    content_measures = int(last_beat // 4) + 1
     gp.write(song, output_path)
-    print(f"Wrote {total_measures} measures to {output_path}")
+    if total_measures > content_measures:
+        print(f"Wrote {total_measures} measures to {output_path} ({total_measures - content_measures} empty bars padded)")
+    else:
+        print(f"Wrote {total_measures} measures to {output_path}")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python midi_to_gp5.py input.mid [output.gp5] [bpm]", file=sys.stderr)
-        sys.exit(1)
-    midi_path = sys.argv[1]
-    output_path = sys.argv[2] if len(sys.argv) > 2 else "output.gp5"
-    bpm = int(sys.argv[3]) if len(sys.argv) > 3 else 72
-    build_gp5(midi_path, output_path, bpm)
+    parser = argparse.ArgumentParser(
+        description="Convert MIDI to GP5 tab.",
+        usage="%(prog)s input.mid [output.gp5] [bpm] [--bass]",
+    )
+    parser.add_argument("input", help="Input MIDI file")
+    parser.add_argument("output", nargs="?", default="output.gp5", help="Output GP5 file (default: output.gp5)")
+    parser.add_argument("bpm", nargs="?", type=int, default=72, help="Playback BPM (default: 72)")
+    parser.add_argument("--bass", action="store_true", help="Bass guitar mode: 4-string standard GDAE tuning")
+    parser.add_argument("--measures", type=int, default=0, metavar="N", help="Pad output to at least N measures with empty bars")
+    args = parser.parse_args()
+    build_gp5(args.input, args.output, args.bpm, bass=args.bass, pad_measures=args.measures)
