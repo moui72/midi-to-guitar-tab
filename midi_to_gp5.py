@@ -154,7 +154,6 @@ def make_beat(voice, note_assignments, gp_value, is_dotted, velocities=None, is_
             string=string_num,
             velocity=min(127, max(1, vel)),
         )
-        note.effect.letRing = True
         beat.notes.append(note)
 
     return beat
